@@ -1,32 +1,33 @@
 #!/bin/bash
 #
-# Homelab Dashboard - One-Line Setup
-# Pulls code from GitHub and runs both collector + dashboard LXC containers
+# Homelab Dashboard - Full Setup
+# Runs both collector + dashboard LXC containers
 #
 
 set -e
+
+# Resolve script directory regardless of where it's called from
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=========================================="
 echo "  Homelab Dashboard - Full Setup"
 echo "=========================================="
 echo ""
 
-# Pull latest code
-echo "Pulling latest code from GitHub..."
-cd "$(dirname "$0")/.."
-git pull origin main 2>/dev/null || git clone https://github.com/ArthurGoins-code/homelab-dashboard.git /tmp/homelab-dashboard && cd /tmp/homelab-dashboard
+# Ensure scripts are executable
+echo "Ensuring scripts are executable..."
+chmod +x "$SCRIPT_DIR/setup-lxc.sh"
+chmod +x "$SCRIPT_DIR/setup-dashboard.sh"
 
 # Deploy Resource Collector (privileged)
 echo ""
 echo "Deploying Resource Collector LXC..."
-chmod +x lxc/setup-lxc.sh
-cd lxc && ./setup-lxc.sh && cd ..
+( cd "$SCRIPT_DIR" && ./setup-lxc.sh )
 
 # Deploy Dashboard (non-privileged)
 echo ""
 echo "Deploying Dashboard LXC..."
-chmod +x lxc/setup-dashboard.sh
-cd lxc && ./setup-dashboard.sh && cd ..
+( cd "$SCRIPT_DIR" && ./setup-dashboard.sh )
 
 echo ""
 echo "=========================================="
