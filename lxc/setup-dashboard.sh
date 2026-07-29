@@ -128,9 +128,29 @@ resolve_template() {
                 ;;
         esac
     else
-        # No template file found - use pveam download
-        echo "  No existing template found. Using pveam to resolve..." >&2
-        TEMPLATE_PATH="${storage}:${template_name}"
+        # No template file found - download via pveam and use cache path
+        echo "  No existing template file found. Downloading via pveam..." >&2
+        local download_output
+        download_output=$(pveam download "$storage" "$template_name" 2>&1)
+        local rc=$?
+        
+        # After download, search for the file by pattern (pveam may rename it)
+        local found_file
+        found_file=$(find /var/lib/vz/template/cache -maxdepth 1 -name "${template_name}*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
+        
+        if [ -n "$found_file" ]; then
+            local fname
+            fname=$(basename "$found_file")
+            echo "  Downloaded: $found_file" >&2
+            TEMPLATE_PATH="local:vztmpl/${fname}"
+        elif [ $rc -eq 0 ]; then
+            # pveam returned success but file not found yet - use pveam alias
+            echo "  pveam download succeeded (alias mode)" >&2
+            TEMPLATE_PATH="${storage}:${template_name}"
+        else
+            echo "  pveam download failed: $download_output" >&2
+            TEMPLATE_PATH="${storage}:${template_name}"
+        fi
     fi
 
     echo "$TEMPLATE_PATH"
