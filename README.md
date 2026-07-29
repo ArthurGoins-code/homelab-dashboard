@@ -22,7 +22,7 @@ homelab-dashboard/
 │   ├── main.py                # FastAPI application
 │   ├── models.py              # Pydantic models
 │   ├── requirements.txt       # Python dependencies
-│   ├── Dockerfile             # Backend Docker image
+│   ├── Dockerfile             # Backend Docker image (alternative)
 │   └── .env                   # Environment configuration
 ├── frontend/                   # React + TypeScript frontend
 │   ├── src/
@@ -47,7 +47,11 @@ homelab-dashboard/
 │   ├── vite.config.ts
 │   ├── tailwind.config.js
 │   └── tsconfig.json
-├── docker-compose.yml          # Docker orchestration
+├── lxc/                      # LXC Container Scripts
+│   ├── collector.sh           # Resource collector (runs in LXC)
+│   ├── setup-lxc.sh           # Collector LXC setup script
+│   └── setup-dashboard.sh     # Dashboard LXC setup script
+├── docker-compose.yml          # Docker orchestration (alternative)
 └── README.md
 ```
 
@@ -179,36 +183,91 @@ docker run -d \
   homelab-collector:latest
 ```
 
+## Deployment Options
+
+### Option 1: LXC Containers (Recommended for Proxmox)
+
+Deploy everything as native Proxmox containers with minimal overhead.
+
+**Step 1: Deploy the Resource Collector LXC** (privileged, monitors host)
+```bash
+chmod +x lxc/setup-lxc.sh
+./lxc/setup-lxc.sh
+```
+
+**Step 2: Deploy the Dashboard LXC** (non-privileged, runs backend + frontend)
+```bash
+chmod +x lxc/setup-dashboard.sh
+./lxc/setup-dashboard.sh
+```
+
+The dashboard LXC will:
+- Clone the code from https://github.com/ArthurGoins-code/homelab-dashboard
+- Install Python dependencies (FastAPI, uvicorn, etc.)
+- Install Node.js and build the React frontend
+- Configure Nginx to serve the frontend and proxy API requests
+- Create systemd services for automatic startup
+
+### Option 2: Docker Compose (Alternative)
+
+```bash
+# Deploy backend and frontend via Docker
+docker-compose up -d
+
+# Deploy collector as privileged LXC (see Option 1)
+./lxc/setup-lxc.sh
+```
+
+### Option 3: Direct Installation
+
+Install everything directly on your Proxmox host or a VM.
+
 ## Setup & Installation
 
 ### Prerequisites
 
-- Docker & Docker Compose
+- Proxmox VE 8.x or later
 - Access to your Proxmox cluster (for node monitoring)
 - Network access to all services
+- Git installed on the Proxmox host
 
-### Quick Start
+### Quick Start (LXC Deployment)
 
-1. **Clone the repository**
+1. **Clone the repository on your Proxmox host**
    ```bash
+   git clone https://github.com/ArthurGoins-code/homelab-dashboard.git
    cd homelab-dashboard
    ```
 
-2. **Configure environment**
+2. **Deploy the Resource Collector** (monitors host resources)
    ```bash
-   cp backend/.env.example backend/.env
-   # Edit backend/.env with your Proxmox credentials
+   chmod +x lxc/setup-lxc.sh
+   ./lxc/setup-lxc.sh
    ```
 
-3. **Start the services**
+3. **Deploy the Dashboard** (backend + frontend)
    ```bash
-   docker-compose up -d
+   chmod +x lxc/setup-dashboard.sh
+   ./lxc/setup-dashboard.sh
    ```
 
 4. **Access the dashboard**
-   - Frontend: http://localhost
-   - Backend API: http://localhost:8000
-   - API Docs: http://localhost:8000/docs
+   - Dashboard: http://192.168.1.201 (or configured IP)
+   - Backend API: http://192.168.1.201:8000
+   - API Docs: http://192.168.1.201:8000/docs
+
+### Custom Configuration
+
+```bash
+# Customize LXC settings
+LXC_ID=200 LXC_CPU=4 LXC_MEMORY=1024 LXC_IP=192.168.1.202/24 ./lxc/setup-dashboard.sh
+
+# Use a different GitHub branch
+GITHUB_BRANCH=develop ./lxc/setup-dashboard.sh
+
+# Different collector LXC
+COLLECTOR_LXC_ID=100 ./lxc/setup-dashboard.sh
+```
 
 ### Development Setup
 
