@@ -63,13 +63,13 @@ pct create "$LXC_ID" \
     "$LXC_TEMPLATE" \
     -storage "$LXC_STORAGE" \
     -arch $(uname -m) \
-    -cpus "$LXC_CPU" \
+    -cores "$LXC_CPU" \
     -memory "$LXC_MEMORY" \
     -swap 256 \
-    -disk "$LXC_DISK" \
+    -rootfs "${LXC_STORAGE}:${LXC_DISK}" \
     -net0 "name=eth0,ip=$LXC_IP,gateway=$LXC_GATEWAY,bridge=$LXC_NETWORK" \
     -hostname "$LXC_NAME" \
-    -rootfs "$LXC_STORAGE,$LXC_DISK" \
+    -unprivileged 1 \
     -features key=ctl
 
 echo "Container created."
