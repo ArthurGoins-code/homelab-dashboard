@@ -143,6 +143,23 @@ prompt_yes_no() {
     fi
 }
 
+# ─── Default Configuration Values ───
+LXC_ID="${LXC_ID:-100}"
+LXC_NAME="${LXC_NAME:-homelab-collector}"
+LXC_TEMPLATE="${LXC_TEMPLATE:-debian-13-standard_13.1-2_amd64}"
+LXC_STORAGE="${LXC_STORAGE:-local}"
+LXC_CORES="${LXC_CORES:-1}"
+LXC_MEMORY="${LXC_MEMORY:-256}"
+LXC_SWAP="${LXC_SWAP:-256}"
+LXC_ROOTFS_DISK="${LXC_ROOTFS_DISK:-2}"
+LXC_NETWORK="${LXC_NETWORK:-vmbr0}"
+LXC_IP="${LXC_IP:-192.168.1.200/24}"
+LXC_GATEWAY="${LXC_GATEWAY:-192.168.1.1}"
+BACKEND_URL="${BACKEND_URL:-http://192.168.1.100:8000}"
+COLLECTOR_INTERVAL="${COLLECTOR_INTERVAL:-30}"
+NODE_NAME="${NODE_NAME:-PX1}"
+LXC_PRIVILEGED="${LXC_PRIVILEGED:-1}"
+
 # ─── Main Setup ───
 echo "=========================================="
 echo "  Homelab Dashboard - LXC Setup"
