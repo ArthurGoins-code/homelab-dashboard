@@ -111,7 +111,7 @@ resolve_template() {
         tname=$(basename "$TEMPLATE_FILE")
         local tpl_size
         tpl_size=$(stat -c%s "$TEMPLATE_FILE" 2>/dev/null || echo "0")
-        echo "  Found template: $TEMPLATE_FILE ($tpl_size bytes)"
+        echo "  Found template: $TEMPLATE_FILE ($tpl_size bytes)" >&2
 
         # Determine TEMPLATE_PATH based on storage and file location
         case "$TEMPLATE_FILE" in
@@ -129,7 +129,7 @@ resolve_template() {
         esac
     else
         # No template file found - use pveam download
-        echo "  No existing template found. Using pveam to resolve..."
+        echo "  No existing template found. Using pveam to resolve..." >&2
         TEMPLATE_PATH="${storage}:${template_name}"
     fi
 
