@@ -302,8 +302,8 @@ check_template_file() {
         if [ -f "${dir}/${name}" ]; then
             local fsize
             fsize=$(stat -c%s "${dir}/${name}" 2>/dev/null || echo "0")
-            echo "  Found: ${dir}/${name} ($fsize bytes)"
-            echo "${dir}/${name}"
+            echo "  Found: ${dir}/${name} ($fsize bytes)" >&2
+            printf '%s' "${dir}/${name}"
             return 0
         fi
 
@@ -311,8 +311,8 @@ check_template_file() {
         if [ -f "${dir}/${name}.tar.zst" ]; then
             local fsize
             fsize=$(stat -c%s "${dir}/${name}.tar.zst" 2>/dev/null || echo "0")
-            echo "  Found: ${dir}/${name}.tar.zst ($fsize bytes)"
-            echo "${dir}/${name}.tar.zst"
+            echo "  Found: ${dir}/${name}.tar.zst ($fsize bytes)" >&2
+            printf '%s' "${dir}/${name}.tar.zst"
             return 0
         fi
 
@@ -320,8 +320,8 @@ check_template_file() {
         if [ -f "${dir}/${name}.tar.gz" ]; then
             local fsize
             fsize=$(stat -c%s "${dir}/${name}.tar.gz" 2>/dev/null || echo "0")
-            echo "  Found: ${dir}/${name}.tar.gz ($fsize bytes)"
-            echo "${dir}/${name}.tar.gz"
+            echo "  Found: ${dir}/${name}.tar.gz ($fsize bytes)" >&2
+            printf '%s' "${dir}/${name}.tar.gz"
             return 0
         fi
 
@@ -331,8 +331,8 @@ check_template_file() {
         if [ -n "$found" ]; then
             local fsize
             fsize=$(stat -c%s "$found" 2>/dev/null || echo "0")
-            echo "  Found: $found ($fsize bytes)"
-            echo "$found"
+            echo "  Found: $found ($fsize bytes)" >&2
+            printf '%s' "$found"
             return 0
         fi
     done
