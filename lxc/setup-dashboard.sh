@@ -22,6 +22,128 @@ GITHUB_REPO="${GITHUB_REPO:-https://github.com/ArthurGoins-code/homelab-dashboar
 GITHUB_BRANCH="${GITHUB_BRANCH:-main}"
 COLLECTOR_LXC_ID="${COLLECTOR_LXC_ID:-100}"
 
+# ─── Get available storage from Proxmox ───
+get_available_storage() {
+    local storage="$1"
+    if [ -n "$storage" ]; then
+        if pvesm status | grep -q "^${storage} "; then
+            echo "$storage"
+            return 0
+        fi
+    fi
+    local storages=("local" "local-lvm" "SMB" "nfs" "ceph")
+    for s in "${storages[@]}"; do
+        if pvesm status 2>/dev/null | grep -q "^${s} "; then
+            echo "$s"
+            return 0
+        fi
+    done
+    local first_storage
+    first_storage=$(pvesm status 2>/dev/null | grep -v "type\|storage" | head -n 1 | awk '{print $1}')
+    if [ -n "$first_storage" ]; then
+        echo "$first_storage"
+        return 0
+    fi
+    echo "local"
+}
+
+# ─── Download template using pveam ───
+download_template_via_pveam() {
+    local template_name="$1"
+    local storage="$2"
+    echo "  Downloading template via pveam..."
+    pveam download "$storage" "$template_name" 2>&1 | tail -n 1
+    if [ -f "/var/lib/vz/template/cache/${template_name}" ]; then
+        local fsize
+        fsize=$(stat -c%s "/var/lib/vz/template/cache/${template_name}" 2>/dev/null || echo "0")
+        echo "  Downloaded: /var/lib/vz/template/cache/${template_name} ($fsize bytes)"
+        return 0
+    fi
+    return 1
+}
+
+# ─── Resolve template name to template path ───
+resolve_template() {
+    local template_name="$1"
+    local storage="$2"
+    local TEMPLATE_PATH=""
+    local TEMPLATE_FILE=""
+
+    # Check if template is a .tar.zst/.tar.gz file that exists on disk
+    local template_dirs=(
+        "/var/lib/vz/template/cache"
+        "/var/lib/vz/template/vztmpl"
+        "/var/lib/vz/template"
+    )
+
+    # Also check SMB storage
+    if [ -d "/mnt/pve/SMB/template" ]; then
+        template_dirs+=("/mnt/pve/SMB/template")
+    fi
+
+    for dir in "${template_dirs[@]}"; do
+        # Try exact name
+        if [ -f "${dir}/${template_name}" ]; then
+            TEMPLATE_FILE="${dir}/${template_name}"
+            break
+        fi
+        # Try with .tar.zst extension
+        if [ -f "${dir}/${template_name}.tar.zst" ]; then
+            TEMPLATE_FILE="${dir}/${template_name}.tar.zst"
+            break
+        fi
+        # Try with .tar.gz extension
+        if [ -f "${dir}/${template_name}.tar.gz" ]; then
+            TEMPLATE_FILE="${dir}/${template_name}.tar.gz"
+            break
+        fi
+        # Try pattern match (e.g., ubuntu-24.04-standard -> ubuntu-24.04-standard-*.tar.zst)
+        local found
+        found=$(find "$dir" -maxdepth 1 -name "${template_name}*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
+        if [ -n "$found" ]; then
+            TEMPLATE_FILE="$found"
+            break
+        fi
+    done
+
+    if [ -n "$TEMPLATE_FILE" ]; then
+        local tname
+        tname=$(basename "$TEMPLATE_FILE")
+        local tpl_size
+        tpl_size=$(stat -c%s "$TEMPLATE_FILE" 2>/dev/null || echo "0")
+        echo "  Found template: $TEMPLATE_FILE ($tpl_size bytes)"
+
+        # Determine TEMPLATE_PATH based on storage and file location
+        case "$TEMPLATE_FILE" in
+            /var/lib/vz/*)
+                TEMPLATE_PATH="local:vztmpl/${tname}"
+                ;;
+            /mnt/pve/*)
+                local tmpl_storage
+                tmpl_storage=$(echo "$TEMPLATE_FILE" | cut -d'/' -f 4)
+                TEMPLATE_PATH="${tmpl_storage}:vztmpl/${tname}"
+                ;;
+            *)
+                TEMPLATE_PATH="${storage}:vztmpl/${tname}"
+                ;;
+        esac
+    else
+        # No template file found - use pveam download
+        echo "  No existing template found. Using pveam to resolve..."
+        TEMPLATE_PATH="${storage}:${template_name}"
+    fi
+
+    echo "$TEMPLATE_PATH"
+}
+
+# Resolve storage if needed
+LXC_STORAGE=$(get_available_storage "$LXC_STORAGE")
+
+# Resolve template path
+echo "Resolving template..."
+TEMPLATE_PATH=$(resolve_template "$LXC_TEMPLATE" "$LXC_STORAGE")
+echo "  Template path: $TEMPLATE_PATH"
+
 echo "=========================================="
 echo "  Homelab Dashboard - LXC Setup"
 echo "=========================================="
@@ -68,7 +190,7 @@ case "$ARCH" in
 esac
 
 pct create "$LXC_ID" \
-    "$LXC_TEMPLATE" \
+    "$TEMPLATE_PATH" \
     -storage "$LXC_STORAGE" \
     -arch "$ARCH" \
     -cores "$LXC_CPU" \
