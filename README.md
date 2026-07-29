@@ -222,6 +222,14 @@ docker-compose up -d
 
 Install everything directly on your Proxmox host or a VM.
 
+## Quick One-Line Setup
+
+Run this single command on your Proxmox host to pull the latest code and deploy both LXC containers:
+
+```bash
+bash -c "git clone https://github.com/ArthurGoins-code/homelab-dashboard.git /tmp/homelab-dashboard 2>/dev/null || true && bash /tmp/homelab-dashboard/lxc/setup-all.sh"
+```
+
 ## Setup & Installation
 
 ### Prerequisites
