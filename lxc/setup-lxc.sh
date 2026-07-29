@@ -9,36 +9,40 @@ set -e
 # Configuration variables (with defaults)
 LXC_ID="${LXC_ID:-100}"
 LXC_NAME="${LXC_NAME:-homelab-collector}"
-LXC_TEMPLATE="${LXC_TEMPLATE:-ubuntu-24.04-standard}"
+LXC_TEMPLATE="${LXC_TEMPLATE:-debian-12-standard}"
 LXC_STORAGE="${LXC_STORAGE:-local}"
-LXC_CPU="${LXC_CPU:-1}"
+LXC_CORES="${LXC_CORES:-1}"
 LXC_MEMORY="${LXC_MEMORY:-256}"
-LXC_DISK="${LXC_DISK:-2}"
+LXC_SWAP="${LXC_SWAP:-256}"
+LXC_ROOTFS_DISK="${LXC_ROOTFS_DISK:-2}"
 LXC_NETWORK="${LXC_NETWORK:-vmbr0}"
 LXC_IP="${LXC_IP:-192.168.1.200/24}"
 LXC_GATEWAY="${LXC_GATEWAY:-192.168.1.1}"
 BACKEND_URL="${BACKEND_URL:-http://192.168.1.100:8000}"
 COLLECTOR_INTERVAL="${COLLECTOR_INTERVAL:-30}"
 NODE_NAME="${NODE_NAME:-$(hostname)}"
+LXC_PRIVILEGED="${LXC_PRIVILEGED:-1}"
 
 echo "=========================================="
 echo "  Homelab Dashboard - LXC Setup"
 echo "=========================================="
 echo ""
 echo "Configuration:"
-echo "  LXC ID:       $LXC_ID"
-echo "  LXC Name:     $LXC_NAME"
-echo "  Template:     $LXC_TEMPLATE"
-echo "  Storage:      $LXC_STORAGE"
-echo "  CPU Cores:    $LXC_CPU"
-echo "  Memory:       $LXC_MEMORY MB"
-echo "  Disk Size:    $LXC_DISK GB"
-echo "  Network:      $LXC_NETWORK"
-echo "  IP Address:   $LXC_IP"
-echo "  Gateway:      $LXC_GATEWAY"
-echo "  Backend URL:  $BACKEND_URL"
-echo "  Interval:     $COLLECTOR_INTERVAL s"
-echo "  Node Name:    $NODE_NAME"
+echo "  LXC ID:         $LXC_ID"
+echo "  LXC Name:       $LXC_NAME"
+echo "  Template:       $LXC_TEMPLATE"
+echo "  Storage:        $LXC_STORAGE"
+echo "  Cores:          $LXC_CORES"
+echo "  Memory:         $LXC_MEMORY MB"
+echo "  Swap:           $LXC_SWAP MB"
+echo "  RootFS Disk:    $LXC_ROOTFS_DISK GB"
+echo "  Network:        $LXC_NETWORK"
+echo "  IP Address:     $LXC_IP"
+echo "  Gateway:        $LXC_GATEWAY"
+echo "  Backend URL:    $BACKEND_URL"
+echo "  Interval:       $COLLECTOR_INTERVAL s"
+echo "  Node Name:      $NODE_NAME"
+echo "  Privileged:     $LXC_PRIVILEGED"
 echo ""
 
 # Check if template exists
@@ -54,40 +58,33 @@ if pct status "$LXC_ID" 2>/dev/null; then
     echo "Existing container destroyed."
 fi
 
-# Resolve template path
-TEMPLATE_PATH="$LXC_TEMPLATE"
-if ! pct template "$LXC_TEMPLATE" 2>/dev/null; then
-    TEMPLATE_PATH="${LXC_STORAGE}:${LXC_TEMPLATE}"
+# Build template path
+TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${LXC_TEMPLATE}"
+
+# Check if template file exists
+if [ ! -f "/var/lib/vz/template/vztmpl/${LXC_TEMPLATE}" ] && [ ! -f "/var/lib/vz/template/vztmpl/${LXC_TEMPLATE}.tar.zst" ]; then
+    # Try just the template name
+    TEMPLATE_PATH="$LXC_TEMPLATE"
+    echo "Template path: $TEMPLATE_PATH"
 fi
 
 # Create the LXC container
 echo ""
 echo "Creating LXC container..."
-TEMPLATE_FILE="$TEMPLATE_PATH"
 
-# Build options array to avoid parsing issues
-OPTIONS=(
-    --storage "$LXC_STORAGE"
-    --arch "$(uname -m)"
-    --cpus "$LXC_CPU"
-    --memory "$LXC_MEMORY"
-    --swap 256
-    --disk "$LXC_DISK"
-    --net0 "name=eth0,ip=${LXC_IP},gateway=${LXC_GATEWAY},bridge=${LXC_NETWORK}"
-    --hostname "$LXC_NAME"
-    --rootfs "${LXC_STORAGE}:${LXC_DISK}"
-    --features "key=ctl,nesting=1"
-    --privileged
-)
+pct create $LXC_ID \
+  $TEMPLATE_PATH \
+  -cores $LXC_CORES \
+  -memory $LXC_MEMORY \
+  -swap $LXC_SWAP \
+  -rootfs ${LXC_STORAGE}-lvm:${LXC_ROOTFS_DISK} \
+  -ostype debian \
+  -hostname $LXC_NAME \
+  -unprivileged $((1 - LXC_PRIVILEGED)) \
+  -net0 name=eth0,bridge=$LXC_NETWORK,firewall=1,ip=$LXC_IP,gw=$LXC_GATEWAY \
+  -start 1
 
-pct create "$LXC_ID" "$TEMPLATE_FILE" "${OPTIONS[@]}"
-
-echo "Container created."
-
-# Start the container
-echo ""
-echo "Starting container..."
-pct start "$LXC_ID"
+echo "Container created and started."
 
 # Wait for container to be ready
 echo "Waiting for container to boot..."
@@ -95,15 +92,15 @@ sleep 3
 
 # Install dependencies inside the container
 echo "Installing system dependencies..."
-pct exec "$LXC_ID" -- sh -c "apt-get update && apt-get install -y python3 python3-pip curl procps"
+pct exec $LXC_ID -- sh -c "apt-get update && apt-get install -y python3 python3-pip curl procps"
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pct exec "$LXC_ID" -- sh -c "pip3 install psutil requests"
+pct exec $LXC_ID -- sh -c "pip3 install psutil requests"
 
 # Create systemd service
 echo "Creating systemd service..."
-pct exec "$LXC_ID" -- sh -c "cat > /etc/systemd/system/homelab-collector.service << SERVEOF
+pct exec $LXC_ID -- sh -c "cat > /etc/systemd/system/homelab-collector.service << SERVEOF
 [Unit]
 Description=Homelab Dashboard Resource Collector
 After=network.target
@@ -124,8 +121,8 @@ SERVEOF"
 
 # Enable and start the service
 echo "Enabling collector service..."
-pct exec "$LXC_ID" -- systemctl enable homelab-collector.service
-pct exec "$LXC_ID" -- systemctl start homelab-collector.service
+pct exec $LXC_ID -- systemctl enable homelab-collector.service
+pct exec $LXC_ID -- systemctl start homelab-collector.service
 
 echo ""
 echo "=========================================="
