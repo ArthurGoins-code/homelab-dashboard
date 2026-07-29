@@ -57,26 +57,30 @@ fi
 # Resolve template path
 TEMPLATE_PATH="$LXC_TEMPLATE"
 if ! pct template "$LXC_TEMPLATE" 2>/dev/null; then
-    # Try with storage prefix
     TEMPLATE_PATH="${LXC_STORAGE}:${LXC_TEMPLATE}"
 fi
 
 # Create the LXC container
 echo ""
 echo "Creating LXC container..."
-pct create "$LXC_ID" \
-    "$TEMPLATE_PATH" \
-    --storage "$LXC_STORAGE" \
-    --arch $(uname -m) \
-    --cpus "$LXC_CPU" \
-    --memory "$LXC_MEMORY" \
-    --swap 256 \
-    --disk "$LXC_DISK" \
-    --net0 "name=eth0,ip=$LXC_IP,gateway=$LXC_GATEWAY,bridge=$LXC_NETWORK" \
-    --hostname "$LXC_NAME" \
-    --rootfs "$LXC_STORAGE,$LXC_DISK" \
-    --features key=ctl,nesting=1 \
+TEMPLATE_FILE="$TEMPLATE_PATH"
+
+# Build options array to avoid parsing issues
+OPTIONS=(
+    --storage "$LXC_STORAGE"
+    --arch "$(uname -m)"
+    --cpus "$LXC_CPU"
+    --memory "$LXC_MEMORY"
+    --swap 256
+    --disk "$LXC_DISK"
+    --net0 "name=eth0,ip=${LXC_IP},gateway=${LXC_GATEWAY},bridge=${LXC_NETWORK}"
+    --hostname "$LXC_NAME"
+    --rootfs "${LXC_STORAGE}:${LXC_DISK}"
+    --features "key=ctl,nesting=1"
     --privileged
+)
+
+pct create "$LXC_ID" "$TEMPLATE_FILE" "${OPTIONS[@]}"
 
 echo "Container created."
 
@@ -97,16 +101,9 @@ pct exec "$LXC_ID" -- sh -c "apt-get update && apt-get install -y python3 python
 echo "Installing Python dependencies..."
 pct exec "$LXC_ID" -- sh -c "pip3 install psutil requests"
 
-# Copy collector script
-echo "Copying collector script..."
-CURRENT_HOST=$(hostname)
-scp lxc/collector.sh "root@$(pct exec "$LXC_ID" -- hostname -I | awk '{print $1}'):/usr/local/bin/collector.sh" 2>/dev/null || \
-    scp lxc/collector.sh root@"$CURRENT_HOST":/usr/local/bin/collector.sh 2>/dev/null || \
-    echo "Note: scp failed, collector.sh will need to be copied manually."
-
 # Create systemd service
 echo "Creating systemd service..."
-pct exec "$LXC_ID" -- sh -c "cat > /etc/systemd/system/homelab-collector.service << EOF
+pct exec "$LXC_ID" -- sh -c "cat > /etc/systemd/system/homelab-collector.service << SERVEOF
 [Unit]
 Description=Homelab Dashboard Resource Collector
 After=network.target
@@ -123,7 +120,7 @@ Environment=LOG_FILE=/var/log/homelab-collector.log
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+SERVEOF"
 
 # Enable and start the service
 echo "Enabling collector service..."
