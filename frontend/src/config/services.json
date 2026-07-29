@@ -1,0 +1,86 @@
+[
+  {
+    "name": "Mealie",
+    "url": "http://mealie.local:8080",
+    "icon": "book-open",
+    "category": "Productivity"
+  },
+  {
+    "name": "AdGuard DNS",
+    "url": "http://adguard.local:3000",
+    "icon": "shield",
+    "category": "Networking"
+  },
+  {
+    "name": "Nginx Proxy Manager",
+    "url": "http://npm.local:81",
+    "icon": "globe",
+    "category": "Networking"
+  },
+  {
+    "name": "Home Assistant",
+    "url": "http://hass.local:8123",
+    "icon": "home",
+    "category": "Productivity"
+  },
+  {
+    "name": "Ubuntu VM",
+    "url": "http://ubuntu.local:3000",
+    "icon": "monitor",
+    "category": "Infrastructure"
+  },
+  {
+    "name": "Ollama",
+    "url": "http://ollama.local:11434",
+    "icon": "cpu",
+    "category": "AI"
+  },
+  {
+    "name": "Grafana",
+    "url": "http://grafana.local:3000",
+    "icon": "grafana",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Prometheus",
+    "url": "http://prometheus.local:9090",
+    "icon": "prometheus",
+    "category": "Monitoring"
+  },
+  {
+    "name": "Docker Sonarr",
+    "url": "http://sonarr.local:8989",
+    "icon": "docker",
+    "category": "Media"
+  },
+  {
+    "name": "Docker Radarr",
+    "url": "http://radarr.local:7878",
+    "icon": "docker",
+    "category": "Media"
+  },
+  {
+    "name": "Docker Plex",
+    "url": "http://plex.local:32400",
+    "icon": "docker",
+    "category": "Media"
+  },
+  {
+    "name": "Cloudflare Tunnel",
+    "url": "https://tunnel.cloudflare.com",
+    "icon": "cloud",
+    "category": "Networking"
+  },
+  {
+    "name": "Database",
+    "url": "http://db.local:5432",
+    "icon": "database",
+    "category": "Infrastructure"
+  },
+  {
+    "name": "Eye of Provision",
+    "url": "http://eye.local:8080",
+    "icon": "eye",
+    "category": "Monitoring"
+  }
+]

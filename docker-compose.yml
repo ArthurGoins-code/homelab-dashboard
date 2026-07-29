@@ -1,0 +1,48 @@
+# Homelab Dashboard - Docker Compose Configuration
+# 
+# For LXC deployment on Proxmox, use:
+#   1. Deploy backend and frontend via docker-compose
+#   2. Deploy resource collector as privileged LXC container
+#   3. Run: chmod +x lxc/setup-lxc.sh && ./lxc/setup-lxc.sh
+services:
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: homelab-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/config:/app/config
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - homelab
+
+  # Frontend (Nginx)
+  frontend:
+    image: nginx:alpine
+    container_name: homelab-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
+    networks:
+      - homelab
+
+networks:
+  homelab:
+    driver: bridge
