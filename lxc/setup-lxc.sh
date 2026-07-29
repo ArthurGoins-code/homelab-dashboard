@@ -152,7 +152,7 @@ LXC_CORES="${LXC_CORES:-1}"
 LXC_MEMORY="${LXC_MEMORY:-256}"
 LXC_SWAP="${LXC_SWAP:-256}"
 LXC_ROOTFS_DISK="${LXC_ROOTFS_DISK:-2}"
-LXC_NETWORK="${LXC_NETWORK:-vmbr0}"
+LXC_NETWORK="${LXC_NETWORK:-vmbr1}"
 LXC_IP="${LXC_IP:-192.168.1.200/24}"
 LXC_GATEWAY="${LXC_GATEWAY:-192.168.1.1}"
 BACKEND_URL="${BACKEND_URL:-http://192.168.1.100:8000}"
@@ -460,7 +460,7 @@ pct exec "$LXC_ID" -- sh -c "apt-get update && apt-get install -y python3 python
 
 # Install Python dependencies
 echo "Installing Python dependencies..."
-pct exec "$LXC_ID" -- sh -c "pip3 install psutil requests"
+pct exec "$LXC_ID" -- sh -c "pip3 install --break-system-packages psutil requests"
 
 # Create collector script inside container
 echo "Installing collector script..."
