@@ -178,12 +178,32 @@ elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
         /var/lib/vz*) LXC_STORAGE="local" ;;
         *) LXC_STORAGE="$LXC_STORAGE" ;;
     esac
-    # Use absolute path format for pct create to ensure it finds the file
-    TEMPLATE_PATH="${LXC_STORAGE}:${TEMPLATE_FILE}"
+    # Use vztmpl content path format for pct create
+    # The vztmpl content directory is at /var/lib/vz/vztmpl/ in Proxmox storage
+    # First check if the file is already at the right location
+    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${TEMPLATE_NAME}"
+    
+    # Check if template exists at the pct-expected location
+    if [ -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" ]; then
+        echo "Template found at /var/lib/vz/vztmpl/"
+    elif [ -f "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" ]; then
+        echo "Template found at /var/lib/vz/template/vztmpl/"
+        # Copy to the expected location for pct create
+        cp "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || true
+        echo "Copied template to /var/lib/vz/vztmpl/"
+    else
+        # File was found by find but may be in a different subdir
+        echo "Template file found at: $TEMPLATE_FILE"
+        echo "Copying to /var/lib/vz/vztmpl/ for pct create..."
+        cp "$TEMPLATE_FILE" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || true
+    fi
+    
     echo "Found template file: $TEMPLATE_FILE"
     echo "Template name: $TEMPLATE_NAME"
     echo "Template storage: $LXC_STORAGE"
     echo "Template path: $TEMPLATE_PATH"
+    echo "Template file exists: $(test -f "$TEMPLATE_FILE" && echo 'yes' || echo 'no')"
+    echo "Template at vztmpl: $(test -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" && echo 'yes' || echo 'no')"
 # Method 3: Use pct download if pct is available
 elif command -v pct &>/dev/null; then
     echo "Template not found on disk. Using pct download..."
