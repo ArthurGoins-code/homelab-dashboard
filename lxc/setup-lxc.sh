@@ -2,6 +2,7 @@
 #
 # Proxmox LXC Setup Script for Homelab Dashboard Resource Collector
 # Run this on your Proxmox host to create and configure the LXC container
+# Inspired by https://github.com/community-scripts/ProxmoxVE
 #
 
 set -e
@@ -57,21 +58,6 @@ if pct status "$LXC_ID" 2>/dev/null | grep -q "running\|stopped"; then
     pct destroy "$LXC_ID"
     echo "Existing container destroyed."
 fi
-
-# Try to find template using pct template command first
-find_template_with_pct() {
-    local template_name="$1"
-    local pct_output
-    pct_output=$(pct template 2>/dev/null || true)
-
-    if [ -n "$pct_output" ]; then
-        if echo "$pct_output" | grep -qi "$template_name" 2>/dev/null; then
-            echo "pct"
-            return 0
-        fi
-    fi
-    return 1
-}
 
 # Find template file in common Proxmox template directories
 find_template_file() {
@@ -143,7 +129,7 @@ download_template_with_pct() {
                 echo "    Trying: $url"
                 if wget --timeout=60 -q "$url" -O "${template_name}.tar.zst" 2>/dev/null; then
                     if [ -s "${template_name}.tar.zst" ]; then
-                        local fsize=$(stat -f%z "${template_name}.tar.zst" 2>/dev/null || stat -c%s "${template_name}.tar.zst" 2>/dev/null)
+                        local fsize=$(stat -c%s "${template_name}.tar.zst" 2>/dev/null || echo "0")
                         if [ "$fsize" -gt 1000 ]; then
                             echo "    Downloaded: $url (${fsize} bytes)"
                             cd -
@@ -163,12 +149,12 @@ download_template_with_pct() {
 TEMPLATE_PATH="$LXC_TEMPLATE"
 TEMPLATE_FILE_PATH=""
 
-# Method 1: Try pct template command
-if find_template_with_pct "$LXC_TEMPLATE" 2>/dev/null; then
+# Method 1: Try pct template command first
+if pct template 2>/dev/null | grep -qi "$LXC_TEMPLATE"; then
     echo "Found template via pct template command."
     TEMPLATE_PATH="$LXC_TEMPLATE"
 # Method 2: Try finding template file on disk (including SMB storage)
-elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
+elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE"); then
     TEMPLATE_NAME=$(basename "$TEMPLATE_FILE")
     TEMPLATE_FILE_PATH="$TEMPLATE_FILE"
     # Detect which storage the file is on
@@ -178,36 +164,38 @@ elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
         /var/lib/vz*) LXC_STORAGE="local" ;;
         *) LXC_STORAGE="$LXC_STORAGE" ;;
     esac
-    # Use vztmpl content path format for pct create
-    # The vztmpl content directory is at /var/lib/vz/vztmpl/ in Proxmox storage
-    # First check if the file is already at the right location
+    
+    # The key insight from mealie.sh: use vztmpl content path
+    # pct create expects template at /var/lib/vz/vztmpl/ for local storage
+    # Check if we need to copy the template
     TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${TEMPLATE_NAME}"
     
-    # Ensure destination directory exists
+    # Ensure the vztmpl directory exists
     mkdir -p /var/lib/vz/vztmpl
     
-    # Check if template exists at the pct-expected location
-    if [ -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" ]; then
-        echo "Template found at /var/lib/vz/vztmpl/"
-    elif [ -f "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" ]; then
-        echo "Template found at /var/lib/vz/template/vztmpl/"
-        # Copy to the expected location for pct create
-        echo "  Copying: /var/lib/vz/template/vztmpl/${TEMPLATE_NAME} -> /var/lib/vz/vztmpl/${TEMPLATE_NAME}"
-        cp -f "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}"
-        echo "Copied template to /var/lib/vz/vztmpl/"
-    else
-        # File was found by find but may be in a different subdir
-        echo "Template file found at: $TEMPLATE_FILE"
-        echo "Copying to /var/lib/vz/vztmpl/ for pct create..."
-        cp -f "$TEMPLATE_FILE" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}"
+    # If template is NOT at /var/lib/vz/vztmpl/ but we're using local storage,
+    # copy it there.  The mealie.sh approach validates template size >= 1MB.
+    if [ "$LXC_STORAGE" = "local" ] && [ ! -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" ]; then
+        src_size=$(stat -c%s "$TEMPLATE_FILE" 2>/dev/null || echo "0")
+        echo "  Template at: $TEMPLATE_FILE ($src_size bytes)"
+        echo "  Copying to /var/lib/vz/vztmpl/"
+        
+        # Use cat to copy (more reliable than cp for some filesystems)
+        cat "$TEMPLATE_FILE" > "/var/lib/vz/vztmpl/${TEMPLATE_NAME}"
+        
+        dst_size=$(stat -c%s "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || echo "0")
+        echo "  Copy complete: $dst_size bytes"
+        
+        if [ "$dst_size" -eq 0 ]; then
+            echo "ERROR: Copy produced 0-byte file!"
+            ls -la "$TEMPLATE_FILE"
+            ls -la /var/lib/vz/vztmpl/
+            exit 1
+        fi
     fi
     
-    echo "Found template file: $TEMPLATE_FILE"
-    echo "Template name: $TEMPLATE_NAME"
-    echo "Template storage: $LXC_STORAGE"
     echo "Template path: $TEMPLATE_PATH"
-    echo "Template file exists: $(test -f "$TEMPLATE_FILE" && echo 'yes' || echo 'no')"
-    echo "Template at vztmpl: $(test -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" && echo 'yes' || echo 'no')"
+    echo "Template exists at vztmpl: $(test -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" && echo 'yes' || echo 'no')"
     echo "Template size: $(stat -c%s "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || echo '0') bytes"
 # Method 3: Use pct download if pct is available
 elif command -v pct &>/dev/null; then
@@ -253,6 +241,17 @@ else
 fi
 
 echo "Using template path: $TEMPLATE_PATH"
+
+# Validate template file size (>= 1MB like mealie.sh does)
+if [ -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" ]; then
+    tpl_size=$(stat -c%s "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || echo "0")
+    if [ "$tpl_size" -lt 1000000 ]; then
+        echo "WARNING: Template file is only $tpl_size bytes (expected >= 1MB)"
+        echo "  This may cause pct create to fail."
+    else
+        echo "Template size OK: $tpl_size bytes"
+    fi
+fi
 
 # Create the LXC container
 echo ""
