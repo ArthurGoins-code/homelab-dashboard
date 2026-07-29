@@ -8,7 +8,7 @@
 set -e
 
 # Configuration variables (with defaults)
-LXC_ID="${LXC_ID:-101}"
+LXC_ID="${LXC_ID:-105}"
 LXC_NAME="${LXC_NAME:-homelab-dashboard}"
 LXC_TEMPLATE="${LXC_TEMPLATE:-ubuntu-24.04-standard}"
 LXC_STORAGE="${LXC_STORAGE:-local}"
