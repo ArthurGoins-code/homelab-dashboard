@@ -161,6 +161,7 @@ download_template_with_pct() {
 
 # Find or download template
 TEMPLATE_PATH="$LXC_TEMPLATE"
+TEMPLATE_FILE_PATH=""
 
 # Method 1: Try pct template command
 if find_template_with_pct "$LXC_TEMPLATE" 2>/dev/null; then
@@ -169,6 +170,7 @@ if find_template_with_pct "$LXC_TEMPLATE" 2>/dev/null; then
 # Method 2: Try finding template file on disk (including SMB storage)
 elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
     TEMPLATE_NAME=$(basename "$TEMPLATE_FILE")
+    TEMPLATE_FILE_PATH="$TEMPLATE_FILE"
     # Detect which storage the file is on
     case "$TEMPLATE_FILE" in
         /mnt/pve/SMB*) LXC_STORAGE="SMB" ;;
@@ -176,7 +178,8 @@ elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
         /var/lib/vz*) LXC_STORAGE="local" ;;
         *) LXC_STORAGE="$LXC_STORAGE" ;;
     esac
-    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${TEMPLATE_NAME}"
+    # Use absolute path format for pct create to ensure it finds the file
+    TEMPLATE_PATH="${LXC_STORAGE}:${TEMPLATE_FILE}"
     echo "Found template file: $TEMPLATE_FILE"
     echo "Template name: $TEMPLATE_NAME"
     echo "Template storage: $LXC_STORAGE"
