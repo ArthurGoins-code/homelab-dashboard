@@ -59,18 +59,25 @@ fi
 # Create the LXC container (non-privileged)
 echo ""
 echo "Creating LXC container..."
+
+# Convert uname architecture to Proxmox format (x86_64 -> amd64)
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+esac
+
 pct create "$LXC_ID" \
     "$LXC_TEMPLATE" \
     -storage "$LXC_STORAGE" \
-    -arch $(uname -m) \
+    -arch "$ARCH" \
     -cores "$LXC_CPU" \
     -memory "$LXC_MEMORY" \
     -swap 256 \
     -rootfs "${LXC_STORAGE}:${LXC_DISK}" \
-    -net0 "name=eth0,ip=$LXC_IP,gateway=$LXC_GATEWAY,bridge=$LXC_NETWORK" \
+    -net0 "name=eth0,bridge=$LXC_NETWORK,ip=$LXC_IP,gw=$LXC_GATEWAY" \
     -hostname "$LXC_NAME" \
-    -unprivileged 1 \
-    -features key=ctl
+    -unprivileged 1
 
 echo "Container created."
 
