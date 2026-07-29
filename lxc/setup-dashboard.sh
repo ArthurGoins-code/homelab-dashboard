@@ -10,8 +10,10 @@ set -e
 # Configuration variables (with defaults)
 LXC_ID="${LXC_ID:-105}"
 LXC_NAME="${LXC_NAME:-homelab-dashboard}"
-LXC_TEMPLATE="${LXC_TEMPLATE:-ubuntu-24.04-standard}"
-LXC_STORAGE="${LXC_STORAGE:-local}"
+# Use same template as setup-lxc.sh (debian-13-standard_13.1-2_amd64)
+LXC_TEMPLATE="${LXC_TEMPLATE:-debian-13-standard_13.1-2_amd64}"
+# Default to SMB storage if available (where the template lives), fall back to local
+LXC_STORAGE="${LXC_STORAGE:-}"
 LXC_CPU="${LXC_CPU:-2}"
 LXC_MEMORY="${LXC_MEMORY:-512}"
 LXC_DISK="${LXC_DISK:-4}"
@@ -31,7 +33,9 @@ get_available_storage() {
             return 0
         fi
     fi
-    local storages=("local" "local-lvm" "SMB" "nfs" "ceph")
+    # Priority: SMB > local > local-lvm > nfs > ceph > first available
+    # SMB is preferred since that's where templates are stored
+    local storages=("SMB" "local" "local-lvm" "nfs" "ceph")
     for s in "${storages[@]}"; do
         if pvesm status 2>/dev/null | grep -q "^${s} "; then
             echo "$s"
@@ -76,9 +80,9 @@ resolve_template() {
         "/var/lib/vz/template"
     )
 
-    # Also check SMB storage
+    # Also check SMB storage FIRST (where templates typically live)
     if [ -d "/mnt/pve/SMB/template" ]; then
-        template_dirs+=("/mnt/pve/SMB/template")
+        template_dirs=("/mnt/pve/SMB/template" "${template_dirs[@]}")
     fi
 
     for dir in "${template_dirs[@]}"; do
@@ -97,7 +101,7 @@ resolve_template() {
             TEMPLATE_FILE="${dir}/${template_name}.tar.gz"
             break
         fi
-        # Try pattern match (e.g., ubuntu-24.04-standard -> ubuntu-24.04-standard-*.tar.zst)
+        # Try pattern match (e.g., debian-13-standard -> debian-13-standard-*.tar.zst)
         local found
         found=$(find "$dir" -maxdepth 1 -name "${template_name}*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
         if [ -n "$found" ]; then
@@ -128,29 +132,9 @@ resolve_template() {
                 ;;
         esac
     else
-        # No template file found - download via pveam and use cache path
-        echo "  No existing template file found. Downloading via pveam..." >&2
-        local download_output
-        download_output=$(pveam download "$storage" "$template_name" 2>&1)
-        local rc=$?
-        
-        # After download, search for the file by pattern (pveam may rename it)
-        local found_file
-        found_file=$(find /var/lib/vz/template/cache -maxdepth 1 -name "${template_name}*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
-        
-        if [ -n "$found_file" ]; then
-            local fname
-            fname=$(basename "$found_file")
-            echo "  Downloaded: $found_file" >&2
-            TEMPLATE_PATH="local:vztmpl/${fname}"
-        elif [ $rc -eq 0 ]; then
-            # pveam returned success but file not found yet - use pveam alias
-            echo "  pveam download succeeded (alias mode)" >&2
-            TEMPLATE_PATH="${storage}:${template_name}"
-        else
-            echo "  pveam download failed: $download_output" >&2
-            TEMPLATE_PATH="${storage}:${template_name}"
-        fi
+        # No template file found - use pveam alias (pveam will download on demand)
+        echo "  No existing template file found. Using pveam alias..." >&2
+        TEMPLATE_PATH="${storage}:${template_name}"
     fi
 
     echo "$TEMPLATE_PATH"
