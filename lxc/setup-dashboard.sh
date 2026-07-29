@@ -285,7 +285,11 @@ echo ""
 echo "Building frontend..."
 pct exec "$LXC_ID" -- sh -c '
     cd /opt/homelab-dashboard/frontend && \
-    npm run build
+    npm run build && \
+    # Copy built files to nginx root
+    cp -r dist/* /usr/share/nginx/html/ && \
+    echo "Frontend files copied:" && \
+    ls -la /usr/share/nginx/html/
 '
 
 echo "Frontend built."
@@ -294,8 +298,21 @@ echo "Frontend built."
 echo ""
 echo "Configuring Nginx..."
 pct exec "$LXC_ID" -- sh -c '
+    # Remove ALL default configs to avoid conflicts
+    rm -f /etc/nginx/sites-enabled/default 2>/dev/null
+    rm -f /etc/nginx/conf.d/default.conf 2>/dev/null
+    
     # Copy the custom nginx config
-    cp /opt/homelab-dashboard/frontend/nginx.conf /etc/nginx/conf.d/default.conf && \
+    cp /opt/homelab-dashboard/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+    
+    # Verify the config file is in place
+    echo "nginx.conf contents:"
+    cat /etc/nginx/conf.d/default.conf
+    
+    # Verify frontend files exist
+    echo ""
+    echo "Frontend files:"
+    ls -la /usr/share/nginx/html/index.html
     
     # Enable nginx modules
     ln -sf /etc/nginx/modules-enabled/* /etc/nginx/modules/ 2>/dev/null || true
@@ -306,14 +323,48 @@ pct exec "$LXC_ID" -- sh -c '
 
 echo "Nginx configured."
 
-# Create systemd service for the dashboard
+# Stop any existing nginx process and restart cleanly
+echo "Restarting Nginx..."
+pct exec "$LXC_ID" -- sh -c '
+    # Stop any existing nginx instances
+    nginx -s stop 2>/dev/null || true
+    sleep 1
+    
+    # Kill any remaining nginx processes
+    pkill -f nginx 2>/dev/null || true
+    sleep 1
+    
+    rm -f /var/run/nginx.pid
+    
+    # Start fresh nginx with our config
+    nginx
+    sleep 1
+    
+    # Verify nginx is running
+    if pgrep -x nginx > /dev/null; then
+        echo "Nginx started successfully"
+        echo "Listening on port 80:"
+        ss -tlnp | grep :80
+    else
+        echo "ERROR: Nginx failed to start"
+        exit 1
+    fi
+'
+
+# Disable default nginx service to avoid conflicts
 echo ""
-echo "Creating systemd service..."
+echo "Disabling default nginx.service..."
+pct exec "$LXC_ID" -- systemctl disable nginx.service 2>/dev/null || true
+pct exec "$LXC_ID" -- systemctl stop nginx.service 2>/dev/null || true
+
+# Create systemd services for the dashboard
+echo ""
+echo "Creating systemd services..."
 pct exec "$LXC_ID" -- sh -c '
     cat > /etc/systemd/system/homelab-dashboard.service << EOF
 [Unit]
-Description=Homelab Dashboard (Backend + Frontend)
-After=network.target
+Description=Homelab Dashboard Backend
+After=network-online.target
 Wants=network-online.target
 
 [Service]
@@ -324,6 +375,8 @@ Environment=PATH=/opt/homelab-dashboard/backend/venv/bin:/usr/bin:/bin
 ExecStart=/opt/homelab-dashboard/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
 Restart=always
 RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
@@ -331,15 +384,20 @@ EOF
 
     cat > /etc/systemd/system/homelab-frontend.service << EOF
 [Unit]
-Description=Homelab Frontend Builder
-After=network.target
+Description=Homelab Frontend (Nginx)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 User=root
-WorkingDirectory=/opt/homelab-dashboard/frontend
-ExecStart=/usr/bin/npm run build
-RemainAfterExit=yes
+ExecStart=/usr/sbin/nginx -g "daemon off;"
+ExecStop=/usr/sbin/nginx -s quit
+ExecReload=/usr/sbin/nginx -s reload
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
@@ -351,8 +409,13 @@ echo ""
 echo "Enabling services..."
 pct exec "$LXC_ID" -- systemctl enable homelab-dashboard.service
 pct exec "$LXC_ID" -- systemctl enable homelab-frontend.service
+
+echo "Starting services..."
 pct exec "$LXC_ID" -- systemctl start homelab-dashboard.service
 pct exec "$LXC_ID" -- systemctl start homelab-frontend.service
+
+# Also start nginx directly in case systemd service needs a moment
+pct exec "$LXC_ID" -- nginx
 
 # Update backend .env with collector info
 echo ""
