@@ -10,6 +10,7 @@ set -e
 LXC_ID="${LXC_ID:-100}"
 LXC_NAME="${LXC_NAME:-homelab-collector}"
 LXC_TEMPLATE="${LXC_TEMPLATE:-debian-12-standard}"
+LXC_TEMPLATE_URL="${LXC_TEMPLATE_URL:-https://mirrors.zlib.cc/proxmox/images/${LXC_TEMPLATE}.tar.zst}"
 LXC_STORAGE="${LXC_STORAGE:-local}"
 LXC_CORES="${LXC_CORES:-1}"
 LXC_MEMORY="${LXC_MEMORY:-256}"
@@ -31,6 +32,7 @@ echo "Configuration:"
 echo "  LXC ID:         $LXC_ID"
 echo "  LXC Name:       $LXC_NAME"
 echo "  Template:       $LXC_TEMPLATE"
+echo "  Template URL:   $LXC_TEMPLATE_URL"
 echo "  Storage:        $LXC_STORAGE"
 echo "  Cores:          $LXC_CORES"
 echo "  Memory:         $LXC_MEMORY MB"
@@ -45,7 +47,28 @@ echo "  Node Name:      $NODE_NAME"
 echo "  Privileged:     $LXC_PRIVILEGED"
 echo ""
 
-# Check if template exists
+# Check if template exists in Proxmox
+check_template() {
+    local template_name="$1"
+    local template_file=""
+
+    # Check in template directory
+    if [ -f "/var/lib/vz/template/vztmpl/${template_name}.tar.zst" ]; then
+        template_file="/var/lib/vz/template/vztmpl/${template_name}.tar.zst"
+    elif [ -f "/var/lib/vz/template/vztmpl/${template_name}" ]; then
+        template_file="/var/lib/vz/template/vztmpl/${template_name}"
+    elif [ -f "/var/lib/vz/template/vztmpl/${template_name}.tar.gz" ]; then
+        template_file="/var/lib/vz/template/vztmpl/${template_name}.tar.gz"
+    fi
+
+    if [ -n "$template_file" ]; then
+        echo "$template_file"
+        return 0
+    fi
+    return 1
+}
+
+# Check if template already exists as a container
 echo "Checking template..."
 if pct status "$LXC_ID" 2>/dev/null; then
     echo "WARNING: LXC container $LXC_ID already exists!"
@@ -58,15 +81,25 @@ if pct status "$LXC_ID" 2>/dev/null; then
     echo "Existing container destroyed."
 fi
 
-# Build template path
-TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${LXC_TEMPLATE}"
+# Find or download template
+TEMPLATE_PATH="$LXC_TEMPLATE"
+TEMPLATE_FILE=$(check_template "$LXC_TEMPLATE" 2>/dev/null || true)
 
-# Check if template file exists
-if [ ! -f "/var/lib/vz/template/vztmpl/${LXC_TEMPLATE}" ] && [ ! -f "/var/lib/vz/template/vztmpl/${LXC_TEMPLATE}.tar.zst" ]; then
-    # Try just the template name
-    TEMPLATE_PATH="$LXC_TEMPLATE"
-    echo "Template path: $TEMPLATE_PATH"
+if [ -n "$TEMPLATE_FILE" ]; then
+    echo "Found template: $TEMPLATE_FILE"
+    TEMPLATE_PATH="$LXC_STORAGE:vztmpl/$(basename "$TEMPLATE_FILE")"
+else
+    echo "Template not found. Downloading..."
+    mkdir -p /var/lib/vz/template/vztmpl
+    cd /var/lib/vz/template/vztmpl
+    wget -q "$LXC_TEMPLATE_URL" -O "${LXC_TEMPLATE}.tar.zst" 2>/dev/null || \
+    wget -q "${LXC_TEMPLATE_URL%.tar.zst}.tar.gz" -O "${LXC_TEMPLATE}.tar.gz" 2>/dev/null || \
+    echo "WARNING: Download failed, will try using template name directly"
+    cd -
+    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/$(basename "$LXC_TEMPLATE")"
 fi
+
+echo "Template path: $TEMPLATE_PATH"
 
 # Create the LXC container
 echo ""
