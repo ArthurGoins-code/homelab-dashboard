@@ -183,19 +183,23 @@ elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
     # First check if the file is already at the right location
     TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${TEMPLATE_NAME}"
     
+    # Ensure destination directory exists
+    mkdir -p /var/lib/vz/vztmpl
+    
     # Check if template exists at the pct-expected location
     if [ -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" ]; then
         echo "Template found at /var/lib/vz/vztmpl/"
     elif [ -f "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" ]; then
         echo "Template found at /var/lib/vz/template/vztmpl/"
         # Copy to the expected location for pct create
-        cp "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || true
+        echo "  Copying: /var/lib/vz/template/vztmpl/${TEMPLATE_NAME} -> /var/lib/vz/vztmpl/${TEMPLATE_NAME}"
+        cp -f "/var/lib/vz/template/vztmpl/${TEMPLATE_NAME}" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}"
         echo "Copied template to /var/lib/vz/vztmpl/"
     else
         # File was found by find but may be in a different subdir
         echo "Template file found at: $TEMPLATE_FILE"
         echo "Copying to /var/lib/vz/vztmpl/ for pct create..."
-        cp "$TEMPLATE_FILE" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || true
+        cp -f "$TEMPLATE_FILE" "/var/lib/vz/vztmpl/${TEMPLATE_NAME}"
     fi
     
     echo "Found template file: $TEMPLATE_FILE"
@@ -204,6 +208,7 @@ elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
     echo "Template path: $TEMPLATE_PATH"
     echo "Template file exists: $(test -f "$TEMPLATE_FILE" && echo 'yes' || echo 'no')"
     echo "Template at vztmpl: $(test -f "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" && echo 'yes' || echo 'no')"
+    echo "Template size: $(stat -c%s "/var/lib/vz/vztmpl/${TEMPLATE_NAME}" 2>/dev/null || echo '0') bytes"
 # Method 3: Use pct download if pct is available
 elif command -v pct &>/dev/null; then
     echo "Template not found on disk. Using pct download..."
