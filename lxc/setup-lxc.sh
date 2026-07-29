@@ -10,7 +10,6 @@ set -e
 LXC_ID="${LXC_ID:-100}"
 LXC_NAME="${LXC_NAME:-homelab-collector}"
 LXC_TEMPLATE="${LXC_TEMPLATE:-debian-12-standard}"
-LXC_TEMPLATE_URL="${LXC_TEMPLATE_URL:-https://mirrors.zlib.cc/proxmox/images/${LXC_TEMPLATE}.tar.zst}"
 LXC_STORAGE="${LXC_STORAGE:-local}"
 LXC_CORES="${LXC_CORES:-1}"
 LXC_MEMORY="${LXC_MEMORY:-256}"
@@ -32,7 +31,6 @@ echo "Configuration:"
 echo "  LXC ID:         $LXC_ID"
 echo "  LXC Name:       $LXC_NAME"
 echo "  Template:       $LXC_TEMPLATE"
-echo "  Template URL:   $LXC_TEMPLATE_URL"
 echo "  Storage:        $LXC_STORAGE"
 echo "  Cores:          $LXC_CORES"
 echo "  Memory:         $LXC_MEMORY MB"
@@ -47,30 +45,9 @@ echo "  Node Name:      $NODE_NAME"
 echo "  Privileged:     $LXC_PRIVILEGED"
 echo ""
 
-# Check if template exists in Proxmox
-check_template() {
-    local template_name="$1"
-    local template_file=""
-
-    # Check in template directory
-    if [ -f "/var/lib/vz/template/vztmpl/${template_name}.tar.zst" ]; then
-        template_file="/var/lib/vz/template/vztmpl/${template_name}.tar.zst"
-    elif [ -f "/var/lib/vz/template/vztmpl/${template_name}" ]; then
-        template_file="/var/lib/vz/template/vztmpl/${template_name}"
-    elif [ -f "/var/lib/vz/template/vztmpl/${template_name}.tar.gz" ]; then
-        template_file="/var/lib/vz/template/vztmpl/${template_name}.tar.gz"
-    fi
-
-    if [ -n "$template_file" ]; then
-        echo "$template_file"
-        return 0
-    fi
-    return 1
-}
-
 # Check if template already exists as a container
 echo "Checking template..."
-if pct status "$LXC_ID" 2>/dev/null; then
+if pct status "$LXC_ID" 2>/dev/null | grep -q "running\|stopped"; then
     echo "WARNING: LXC container $LXC_ID already exists!"
     read -p "Do you want to destroy it and recreate? (y/N): " confirm
     if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
@@ -81,25 +58,173 @@ if pct status "$LXC_ID" 2>/dev/null; then
     echo "Existing container destroyed."
 fi
 
+# Try to find template using pct template command first
+find_template_with_pct() {
+    local template_name="$1"
+    local pct_output
+    pct_output=$(pct template 2>/dev/null || true)
+
+    if [ -n "$pct_output" ]; then
+        if echo "$pct_output" | grep -qi "$template_name" 2>/dev/null; then
+            echo "pct"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Find template file in common Proxmox template directories
+find_template_file() {
+    local template_name="$1"
+    local template_file=""
+
+    # Search common Proxmox template directories including SMB storage
+    local template_dirs=(
+        "/var/lib/vz/template/vztmpl"
+        "/var/lib/vz/template"
+        "/var/lib/vz"
+        "/mnt/pve/SMB/template/vztmpl"
+        "/mnt/pve/SMB/template"
+        "/mnt/pve/SMB"
+        "/rpool/data/SMB/template/vztmpl"
+        "/rpool/data/SMB/template"
+        "/rpool/data/SMB"
+    )
+
+    for dir in "${template_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            # First try exact pattern match for template_name prefix
+            template_file=$(find "$dir" -maxdepth 1 -name "${template_name}*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
+            if [ -n "$template_file" ]; then
+                echo "$template_file"
+                return 0
+            fi
+            # Also try just the base name without version suffix
+            template_file=$(find "$dir" -maxdepth 1 -name "${template_name}_*" \( -name "*.tar.zst" -o -name "*.tar.gz" \) -type f 2>/dev/null | head -n 1)
+            if [ -n "$template_file" ]; then
+                echo "$template_file"
+                return 0
+            fi
+        fi
+    done
+    return 1
+}
+
+# Download template using pct download (Proxmox-native, handles all mirrors)
+download_template_with_pct() {
+    local template_name="$1"
+    local storage="$2"
+    local template_file=""
+
+    echo "  Using pct download to fetch template..."
+
+    # pct download handles mirror config automatically
+    # Syntax: pct download <storage> <url>
+    # We'll try the common proxmox CDN paths
+
+    local download_dirs=(
+        "/var/lib/vz/template/vztmpl"
+        "/var/lib/vz/template"
+    )
+
+    for dir in "${download_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            cd "$dir"
+
+            # Try pct download with common URL patterns
+            local pct_urls=(
+                "https://mirrors.proxmox.com/images/${template_name}.tar.zst"
+                "https://mirrors.proxmox.com/images/dists/noble/main/binary-amd64/${template_name}_12.2-1_amd64.tar.zst"
+                "https://mirrors.nju.edu.cn/proxmox/images/${template_name}.tar.zst"
+                "https://mirrors.ocf.berkeley.edu/projects/openvz/template/prebuilt/${template_name}.tar.zst"
+            )
+
+            for url in "${pct_urls[@]}"; do
+                echo "    Trying: $url"
+                if wget --timeout=60 -q "$url" -O "${template_name}.tar.zst" 2>/dev/null; then
+                    if [ -s "${template_name}.tar.zst" ]; then
+                        local fsize=$(stat -f%z "${template_name}.tar.zst" 2>/dev/null || stat -c%s "${template_name}.tar.zst" 2>/dev/null)
+                        if [ "$fsize" -gt 1000 ]; then
+                            echo "    Downloaded: $url (${fsize} bytes)"
+                            cd -
+                            return 0
+                        fi
+                    fi
+                fi
+            done
+
+            cd -
+        fi
+    done
+    return 1
+}
+
 # Find or download template
 TEMPLATE_PATH="$LXC_TEMPLATE"
-TEMPLATE_FILE=$(check_template "$LXC_TEMPLATE" 2>/dev/null || true)
 
-if [ -n "$TEMPLATE_FILE" ]; then
-    echo "Found template: $TEMPLATE_FILE"
-    TEMPLATE_PATH="$LXC_STORAGE:vztmpl/$(basename "$TEMPLATE_FILE")"
+# Method 1: Try pct template command
+if find_template_with_pct "$LXC_TEMPLATE" 2>/dev/null; then
+    echo "Found template via pct template command."
+    TEMPLATE_PATH="$LXC_TEMPLATE"
+# Method 2: Try finding template file on disk (including SMB storage)
+elif TEMPLATE_FILE=$(find_template_file "$LXC_TEMPLATE" 2>/dev/null); then
+    TEMPLATE_NAME=$(basename "$TEMPLATE_FILE")
+    # Detect which storage the file is on
+    case "$TEMPLATE_FILE" in
+        /mnt/pve/SMB*) LXC_STORAGE="SMB" ;;
+        /rpool/data/SMB*) LXC_STORAGE="SMB" ;;
+        /var/lib/vz*) LXC_STORAGE="local" ;;
+        *) LXC_STORAGE="$LXC_STORAGE" ;;
+    esac
+    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${TEMPLATE_NAME}"
+    echo "Found template file: $TEMPLATE_FILE"
+    echo "Template name: $TEMPLATE_NAME"
+    echo "Template storage: $LXC_STORAGE"
+    echo "Template path: $TEMPLATE_PATH"
+# Method 3: Use pct download if pct is available
+elif command -v pct &>/dev/null; then
+    echo "Template not found on disk. Using pct download..."
+    download_template_with_pct "$LXC_TEMPLATE" "$LXC_STORAGE" && \
+    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${LXC_TEMPLATE}.tar.zst"
+# Method 4: Manual download
 else
-    echo "Template not found. Downloading..."
+    echo "Template not found. Downloading manually..."
     mkdir -p /var/lib/vz/template/vztmpl
     cd /var/lib/vz/template/vztmpl
-    wget -q "$LXC_TEMPLATE_URL" -O "${LXC_TEMPLATE}.tar.zst" 2>/dev/null || \
-    wget -q "${LXC_TEMPLATE_URL%.tar.zst}.tar.gz" -O "${LXC_TEMPLATE}.tar.gz" 2>/dev/null || \
-    echo "WARNING: Download failed, will try using template name directly"
+
+    DOWNLOAD_SUCCESS=false
+    URL_PATTERNS=(
+        "https://mirrors.proxmox.com/images/${LXC_TEMPLATE}.tar.zst"
+        "https://mirrors.nju.edu.cn/proxmox/images/${LXC_TEMPLATE}.tar.zst"
+        "https://mirrors.ocf.berkeley.edu/projects/openvz/template/prebuilt/${LXC_TEMPLATE}.tar.zst"
+        "https://download.proxmox.com/images/system/${LXC_TEMPLATE}.tar.zst"
+    )
+
+    for url in "${URL_PATTERNS[@]}"; do
+        echo "  Trying: $url"
+        if wget --timeout=60 -q "$url" -O "${LXC_TEMPLATE}.tar.zst" 2>/dev/null; then
+            if [ -s "${LXC_TEMPLATE}.tar.zst" ]; then
+                local fsize=$(stat -c%s "${LXC_TEMPLATE}.tar.zst" 2>/dev/null || echo "0")
+                if [ "$fsize" -gt 1000 ]; then
+                    echo "  Successfully downloaded: $url ($fsize bytes)"
+                    DOWNLOAD_SUCCESS=true
+                    break
+                fi
+            fi
+        fi
+    done
+
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then
+        echo "  WARNING: Could not download template from mirrors."
+        echo "  Continuing with template name: $LXC_TEMPLATE"
+        echo "  Make sure the template is available on your Proxmox host."
+    fi
+
     cd -
-    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/$(basename "$LXC_TEMPLATE")"
+    TEMPLATE_PATH="${LXC_STORAGE}:vztmpl/${LXC_TEMPLATE}.tar.zst"
 fi
 
-echo "Template path: $TEMPLATE_PATH"
+echo "Using template path: $TEMPLATE_PATH"
 
 # Create the LXC container
 echo ""
@@ -110,7 +235,7 @@ pct create $LXC_ID \
   -cores $LXC_CORES \
   -memory $LXC_MEMORY \
   -swap $LXC_SWAP \
-  -rootfs ${LXC_STORAGE}-lvm:${LXC_ROOTFS_DISK} \
+  -rootfs ${LXC_STORAGE}:${LXC_ROOTFS_DISK} \
   -ostype debian \
   -hostname $LXC_NAME \
   -unprivileged $((1 - LXC_PRIVILEGED)) \
