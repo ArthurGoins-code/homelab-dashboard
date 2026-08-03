@@ -81,19 +81,23 @@ class ProxmoxClient:
         vms = []
 
         # Get QEMU VMs
-        vm_data = await self._get("qemu" if node else "nodes/all/qemu")
+        if node:
+            vm_data = await self._get(f"nodes/{node}/qemu")
+        else:
+            vm_data = await self._get("nodes/all/qemu")
+            
         vm_list = vm_data.get("data", [])
 
-        if node:
-            vm_list = vm_list if isinstance(vm_list, list) else [vm_list]
+        if not isinstance(vm_list, list):
+            vm_list = [vm_list]
 
         for vm in vm_list:
+            # Only include running VMs
             if vm.get("status", "stopped").lower() == "running":
-                vm_type = "qemu" if "vmid" in vm and vm["vmid"] > 1000 else "lxc"
                 vms.append(VirtualMachine(
                     name=vm.get("name", f"VM-{vm.get('vmid', 'unknown')}"),
                     vm_id=vm.get("vmid", 0),
-                    type="qemu" if "maxcpu" in vm else "lxc",
+                    type="qemu",
                     status=vm.get("status", "stopped").lower(),
                     cpu=vm.get("cpu", 0.0),
                     memory_total=vm.get("maxmem", 0),
@@ -104,13 +108,16 @@ class ProxmoxClient:
                     uptime=vm.get("uptime", 0),
                 ))
 
-        # Get LXC containers if not filtering by node
+        # Get LXC containers
         if not node:
             lxc_data = await self._get("nodes/all/lxc")
             lxc_list = lxc_data.get("data", [])
-            lxc_list = lxc_list if isinstance(lxc_list, list) else [lxc_list]
+            
+            if not isinstance(lxc_list, list):
+                lxc_list = [lxc_list]
 
             for lxc in lxc_list:
+                # Only include running containers
                 if lxc.get("status", "stopped").lower() == "running":
                     vms.append(VirtualMachine(
                         name=lxc.get("name", f"LXC-{lxc.get('vid', 'unknown')}"),

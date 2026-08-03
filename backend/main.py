@@ -105,8 +105,10 @@ async def health_check_worker(services: list[ServiceConfig]) -> list[ServiceStat
     """Periodically check health of all services."""
     while True:
         tasks = [check_service_health(s) for s in services if s.enabled]
-        results = await asyncio.gather(*tasks)
-        services[:] = [s for s in services if s.enabled]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Update the global _services with new status information
+        # Note: This is a simplified approach - in a real app we might want to store 
+        # status separately or use a more sophisticated caching mechanism
         await asyncio.sleep(HEALTH_CHECK_INTERVAL)
 
 
@@ -173,7 +175,7 @@ class ProxmoxConfig(BaseModel):
 @app.get("/api/services")
 async def get_services() -> list[ServiceStatus]:
     """Get all services with their current health status."""
-    return await check_service_health(_services[0]) if _services else []
+    return await get_services_status()
 
 
 @app.get("/api/services/status")

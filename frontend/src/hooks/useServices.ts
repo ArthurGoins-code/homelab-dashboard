@@ -10,10 +10,10 @@ export function useServices() {
 
   const fetchServices = useCallback(async () => {
     try {
-      const response = await fetch(`${API_BASE}/services/status`);
+      const response = await fetch(`${API_BASE}/services`);
       if (!response.ok) throw new Error('Failed to fetch services');
       const data = await response.json();
-      setServices(data);
+      setServices(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

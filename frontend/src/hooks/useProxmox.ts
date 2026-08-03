@@ -41,7 +41,7 @@ export function useProxmoxVMs() {
       const response = await fetch(`${API_BASE}/proxmox/vms`);
       if (!response.ok) throw new Error('Failed to fetch VMs');
       const data = await response.json();
-      setVMs(data);
+      setVMs(Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');

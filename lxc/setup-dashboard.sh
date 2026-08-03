@@ -411,11 +411,60 @@ pct exec "$LXC_ID" -- systemctl enable homelab-dashboard.service
 pct exec "$LXC_ID" -- systemctl enable homelab-frontend.service
 
 echo "Starting services..."
-pct exec "$LXC_ID" -- systemctl start homelab-dashboard.service
 pct exec "$LXC_ID" -- systemctl start homelab-frontend.service
+pct exec "$LXC_ID" -- systemctl start homelab-dashboard.service
 
-# Also start nginx directly in case systemd service needs a moment
-pct exec "$LXC_ID" -- nginx
+# Wait for services to start and verify they're running
+echo "Waiting for services to start..."
+sleep 3
+
+# Check if nginx is listening on port 80
+NGINX_RUNNING=$(pct exec "$LXC_ID" -- pgrep -x nginx 2>/dev/null | wc -l)
+if [ "$NGINX_RUNNING" -eq 0 ]; then
+    echo "WARNING: nginx may not have started. Attempting manual start..."
+    pct exec "$LXC_ID" -- sh -c '
+        # Kill any stray nginx
+        pkill -9 nginx 2>/dev/null || true
+        sleep 1
+        # Start nginx directly
+        nginx -g "daemon off;" &
+        sleep 2
+        ss -tlnp | grep :80
+    '
+fi
+
+# Check if backend is listening on port 8000
+BACKEND_RUNNING=$(pct exec "$LXC_ID" -- pgrep -f uvicorn 2>/dev/null | wc -l)
+if [ "$BACKEND_RUNNING" -eq 0 ]; then
+    echo "WARNING: backend may not have started. Attempting manual start..."
+    pct exec "$LXC_ID" -- sh -c '
+        cd /opt/homelab-dashboard && \
+        . backend/venv/bin/activate && \
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 &
+    '
+fi
+
+echo ""
+echo "Verifying services..."
+pct exec "$LXC_ID" -- sh -c '
+    echo "=== Nginx processes ==="
+    pgrep -x nginx && echo "nginx: RUNNING" || echo "nginx: NOT RUNNING"
+    
+    echo ""
+    echo "=== Uvicorn processes ==="
+    pgrep -f uvicorn && echo "backend: RUNNING" || echo "backend: NOT RUNNING"
+    
+    echo ""
+    echo "=== Listening ports ==="
+    ss -tlnp | grep -E ":80|:8000"
+    
+    echo ""
+    echo "=== Test HTTP response ==="
+    curl -s -o /dev/null -w "HTTP Status: %{http_code}" http://localhost/
+    echo ""
+    curl -s -o /dev/null -w "HTTP Status: %{http_code}" http://localhost:8000/api/health
+    echo ""
+'
 
 # Update backend .env with collector info
 echo ""
@@ -427,6 +476,11 @@ pct exec "$LXC_ID" -- sh -c "
     if [ ! -f /opt/homelab-dashboard/backend/.env ]; then
         cat > /opt/homelab-dashboard/backend/.env << ENVEOF
 # Proxmox Configuration
+PROXMOX_URL=https://\${BACKEND_URL}:8006
+PROXMOX_USER=root@pam
+PROXMOX_PASSWORD=your_password
+PROXMOX_TOKEN_ID=
+PROXMOX_TOKEN_SECRET=
 PROXMOX_HOSTS=primary,secondary,ollama-node
 PROXMOX_PRIMARY_HOST=\${BACKEND_URL}
 PROXMOX_PRIMARY_PORT=8006
@@ -463,11 +517,27 @@ echo "  Dashboard URL:   http://$LXC_IP"
 echo "  Backend API:     http://$LXC_IP:8000"
 echo "  API Docs:        http://$LXC_IP:8000/docs"
 echo ""
-echo "  Management commands:"
-echo "    pct start $LXC_ID"
-echo "    pct stop $LXC_ID"
-echo "    pct console $LXC_ID"
-echo "    pct exec $LXC_ID -- bash"
+echo "  Quick diagnostic commands:"
+echo "    # Check if nginx is running:"
+echo "    pct exec $LXC_ID -- pgrep -x nginx && echo 'nginx running' || echo 'nginx NOT running'"
+echo ""
+echo "    # Check what nginx is serving:"
+echo "    pct exec $LXC_ID -- ls -la /usr/share/nginx/html/"
+echo ""
+echo "    # Check nginx config file:"
+echo "    pct exec $LXC_ID -- cat /etc/nginx/conf.d/default.conf"
+echo ""
+echo "    # Check if backend is running:"
+echo "    pct exec $LXC_ID -- pgrep -x uvicorn && echo 'backend running' || echo 'backend NOT running'"
+echo ""
+echo "    # Check listening ports:"
+echo "    pct exec $LXC_ID -- ss -tlnp | grep -E ':80|:8000'"
+echo ""
+echo "    # Test nginx directly:"
+echo "    pct exec $LXC_ID -- curl -s http://localhost/ | head -20"
+echo ""
+echo "    # Restart all services:"
+echo "    pct exec $LXC_ID -- systemctl restart homelab-frontend.service && systemctl restart homelab-dashboard.service"
 echo ""
 echo "  View logs:"
 echo "    journalctl -u homelab-dashboard.service -f"
